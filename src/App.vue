@@ -18,12 +18,10 @@
             >
               <template #prefix>Port:</template>
             </el-input-number> -->
-
-            <el-button type="primary" @click="clearLogs">清空 ({{ logs.length }})</el-button>
           </div>
         </header>
 
-        <virtualized-table :logs="logs" />
+        <virtualized-table :logs="logs" :clearLogs="clearLogs" />
       </el-splitter-panel>
 
       <el-splitter-panel>

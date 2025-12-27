@@ -9,7 +9,6 @@ export function useSocket({ port }: { port: Ref<number> }) {
 
   // 初始化连接
   const connect = () => {
-    // 1. 如果已有连接，先断开
     if (socket.value) {
       socket.value.close()
       isConnected.value = false
@@ -28,22 +27,24 @@ export function useSocket({ port }: { port: Ref<number> }) {
     socket.value.on('fn-trace', (data?: FnTraceItem) => {
       if (!data) return
 
+      // 避免service刷屏
+      if (
+        data.type === 'Service' &&
+        logs.value.find((i) => {
+          return i.callPath === data.callPath
+        })
+      ) {
+        return
+      }
+
       logs.value.push({
         ...data,
         isFormatted: false,
       })
     })
 
-    // 2. 监听远程控制台输出 (console-log)
-    socket.value.on('console-log', (data: { type: string; content: string; time: number }) => {
-      // 你可以在这里处理远程日志，例如存入专门的 consoleLogs 数组
-      // 这里暂时演示直接打印到浏览器控制台
-      console.log(`[Remote Node ${data.type.toUpperCase()}]`, data.content)
-    })
-
-    // 3. 监听执行结果
-    socket.value.on('execute-result', (res: { success: boolean; result: string }) => {
-      console.log('🚀 执行结果回传:', new Function(`return ${res.result}`)())
+    socket.value.on('execute-result', (res: { success: boolean; res: unknown }) => {
+      console.log('🚀 执行结果回传:', res)
     })
 
     socket.value.on('disconnect', () => {
@@ -52,7 +53,7 @@ export function useSocket({ port }: { port: Ref<number> }) {
   }
 
   const clearLogs = () => {
-    logs.value = []
+    logs.value.length = 0
   }
 
   /**

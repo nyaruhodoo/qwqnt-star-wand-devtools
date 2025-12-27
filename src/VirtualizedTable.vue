@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-full">
+  <div class="flex flex-col h-full gap-4">
     <div class="flex items-center gap-4">
       <el-input v-model="filterPath" placeholder="函数路径" clearable style="width: 300px" />
 
@@ -15,6 +15,12 @@
         <el-checkbox-button label="error" value="error" />
         <el-checkbox-button label="cancel" value="cancel" />
       </el-checkbox-group>
+    </div>
+
+    <div>
+      <el-button type="primary" @click="clearLogs"
+        >清空 ({{ filteredLogs.length }}/{{ logs.length }})</el-button
+      >
 
       <el-button @click="autoScroll = !autoScroll" class="ml-auto mr-4">
         {{ autoScroll ? '自动滚动中' : '已暂停滚动' }}
@@ -24,6 +30,7 @@
     <el-auto-resizer class="flex-1">
       <template #default="{ height, width }">
         <el-table-v2
+          v-model:expanded-row-keys="expandedRowKeys"
           :columns="columns"
           :data="filteredLogs"
           :width="width"
@@ -33,6 +40,7 @@
           :expand-column-key="columns[0]?.key"
           :estimated-row-height="50"
           ref="tableRef"
+          @row-expand="onRowExpand"
         >
           <template #row="props">
             <Row v-bind="props" />
@@ -66,12 +74,13 @@ const codeHighlight = (code?: string) => {
 const tableRef = ref<TableV2Instance>()
 const { logs } = defineProps<{
   logs: FnTraceItem[]
+  clearLogs: () => void
 }>()
 
 const autoScroll = ref(true)
-
+const expandedRowKeys = ref<string[]>([])
 const filterPath = ref('')
-const filterTypes = ref<string[]>(['Function', 'AsyncFunction', 'Listener'])
+const filterTypes = ref<string[]>(['Function', 'AsyncFunction', 'Listener', 'Service'])
 const filterStatus = ref<string[]>(['ok', 'error', 'cancel'])
 
 const filteredLogs = computed(() => {
@@ -112,6 +121,7 @@ const columns = [
     cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
       return <span>{dayjs(rowData.callTime).format('HH:mm:ss.SSS')}</span>
     },
+    // sortable: true,
   },
   {
     key: 'callPath',
@@ -121,7 +131,14 @@ const columns = [
     cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
       return (
         <el-tooltip effect="dark" content={rowData.callPath} placement="top">
-          {rowData?.callPath?.split('/').pop()}
+          <span
+            class="cursor-pointer"
+            onClick={() => {
+              copyToClipboard(rowData.callPath)
+            }}
+          >
+            {rowData?.callPath?.split('/').pop()}
+          </span>
         </el-tooltip>
       )
     },
@@ -163,11 +180,13 @@ const Row = ({ cells, rowData }: { cells: unknown; rowData: FnTraceItem }) => {
   // @ts-expect-error  忽略错误
   if (rowData.isDetail)
     return (
-      <div class="flex flex-wrap w-full p-4 gap-3">
+      <div class="flex flex-wrap w-full p-4 gap-3 relative">
         <div>
           <span
-            onClick={() => {
+            class="cursor-pointer transition-colors hover:text-blue-500"
+            onClick={(e) => {
               copyToClipboard(rowData.requestParams)
+              e.stopPropagation()
             }}
           >
             请求参数：
@@ -178,13 +197,7 @@ const Row = ({ cells, rowData }: { cells: unknown; rowData: FnTraceItem }) => {
         </div>
 
         <div>
-          <span
-            onClick={() => {
-              copyToClipboard(rowData.responseParams)
-            }}
-          >
-            响应结果：
-          </span>
+          <span class="cursor-pointer transition-colors hover:text-blue-500">响应结果：</span>
           <pre>
             <code v-html={codeHighlight(rowData.responseParams)} />
           </pre>
@@ -196,7 +209,19 @@ const Row = ({ cells, rowData }: { cells: unknown; rowData: FnTraceItem }) => {
 }
 Row.inheritAttrs = false
 
-// 核心逻辑：监听数据变化，自动滚动到底部
+let timerId: number | undefined
+
+const onRowExpand = ({ expanded }: { expanded: boolean }) => {
+  if (expanded) {
+    autoScroll.value = false
+    clearTimeout(timerId)
+  } else {
+    // timerId = setTimeout(() => {
+    //   autoScroll.value = true
+    // }, 5000)
+  }
+}
+
 watch(
   () => filteredLogs.value.length,
   () => {
