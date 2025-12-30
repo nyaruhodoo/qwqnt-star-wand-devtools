@@ -1,8 +1,16 @@
 <template>
   <div class="flex flex-col h-full gap-4">
     <div class="flex items-center gap-4">
-      <el-input v-model="filterPath" placeholder="函数路径" clearable style="width: 300px" />
+      <el-input v-model="filterPath" placeholder="匹配函数路径" clearable style="width: 300px" />
+      <el-input
+        v-model="filterRes"
+        placeholder="匹配参数/响应结果"
+        clearable
+        style="width: 300px"
+      />
+    </div>
 
+    <div class="flex items-center gap-4">
       <el-checkbox-group v-model="filterTypes">
         <el-checkbox-button label="Function" value="Function" />
         <el-checkbox-button label="AsyncFunction" value="AsyncFunction" />
@@ -80,6 +88,7 @@ const { logs } = defineProps<{
 const autoScroll = ref(true)
 const expandedRowKeys = ref<string[]>([])
 const filterPath = ref('')
+const filterRes = ref('')
 const filterTypes = ref<string[]>(['Function', 'AsyncFunction', 'Listener', 'Service'])
 const filterStatus = ref<string[]>(['ok', 'error', 'cancel'])
 
@@ -95,7 +104,12 @@ const filteredLogs = computed(() => {
       // 3. 状态匹配
       const matchStatus = filterStatus.value.includes(item?.status ?? '')
 
-      return matchPath && matchType && matchStatus
+      // 4. 结果匹配
+      const matchRes =
+        item?.requestParams?.includes(filterRes.value) ||
+        item?.responseParams?.includes(filterRes.value)
+
+      return matchPath && matchType && matchStatus && matchRes
     })
     .map((i) => {
       // @ts-expect-error  忽略错误
