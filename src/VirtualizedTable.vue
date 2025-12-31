@@ -175,7 +175,11 @@ const columns = [
         cancel: 'danger',
       }[rowData?.status || 'ok']
 
-      return <el-tag type={type}>{rowData?.status}</el-tag>
+      return (
+        <el-tag type={type} disable-transitions>
+          {rowData?.status}
+        </el-tag>
+      )
     },
   },
 ]
@@ -194,8 +198,8 @@ const Row = ({ cells, rowData }: { cells: unknown; rowData: FnTraceItem }) => {
   // @ts-expect-error  忽略错误
   if (rowData.isDetail)
     return (
-      <div class="flex flex-wrap w-full p-4 gap-3 relative">
-        <div>
+      <div class="flex w-full p-4 gap-3 relative max-h-125">
+        <div class="flex-1 flex flex-col">
           <span
             class="cursor-pointer transition-colors hover:text-blue-500"
             onClick={(e) => {
@@ -205,14 +209,14 @@ const Row = ({ cells, rowData }: { cells: unknown; rowData: FnTraceItem }) => {
           >
             请求参数：
           </span>
-          <pre>
+          <pre class="flex-1 overflow-y-auto">
             <code v-html={codeHighlight(rowData.requestParams)} />
           </pre>
         </div>
 
-        <div>
+        <div class="flex-1 flex flex-col">
           <span class="cursor-pointer transition-colors hover:text-blue-500">响应结果：</span>
-          <pre>
+          <pre class="flex-1 overflow-y-auto">
             <code v-html={codeHighlight(rowData.responseParams)} />
           </pre>
         </div>
@@ -223,16 +227,9 @@ const Row = ({ cells, rowData }: { cells: unknown; rowData: FnTraceItem }) => {
 }
 Row.inheritAttrs = false
 
-let timerId: number | undefined
-
 const onRowExpand = ({ expanded }: { expanded: boolean }) => {
   if (expanded) {
     autoScroll.value = false
-    clearTimeout(timerId)
-  } else {
-    // timerId = setTimeout(() => {
-    //   autoScroll.value = true
-    // }, 5000)
   }
 }
 
@@ -262,6 +259,5 @@ pre {
   white-space: pre-wrap !important; /* 保留空格但允许换行 */
   word-break: break-all !important; /* 强制在单词内换行，防止长字符串撑破容器 */
   margin: 4px 0;
-  overflow: hidden; /* 防止内部出现滚动条，让高度由内容决定 */
 }
 </style>
