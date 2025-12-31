@@ -67,7 +67,7 @@ import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import 'highlight.js/styles/atom-one-dark.css'
 import 'element-plus/es/components/message/style/css'
-import { formatCodeLight } from './utils'
+import { formatCodeLight, matchValue } from './utils'
 hljs.registerLanguage('javascript', javascript)
 
 const codeHighlight = (code?: string) => {
@@ -96,7 +96,7 @@ const filteredLogs = computed(() => {
   return logs
     .filter((item) => {
       // 1. 路径匹配
-      const matchPath = item?.callPath?.toLowerCase().includes(filterPath.value.toLowerCase())
+      const matchPath = matchValue(item?.callPath, filterPath.value)
 
       // 2. 类型匹配
       const matchType = filterTypes.value.includes(item?.type ?? '')
@@ -106,8 +106,8 @@ const filteredLogs = computed(() => {
 
       // 4. 结果匹配
       const matchRes =
-        item?.requestParams?.includes(filterRes.value) ||
-        item?.responseParams?.includes(filterRes.value)
+        matchValue(item?.requestParams, filterRes.value) ||
+        matchValue(item?.responseParams, filterRes.value)
 
       return matchPath && matchType && matchStatus && matchRes
     })
