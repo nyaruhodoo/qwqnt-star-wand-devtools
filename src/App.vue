@@ -75,8 +75,8 @@ const port = ref(3666)
 const { isConnected, executeRemoteCode, logs, clearLogs } = useSocket({
   port,
 })
-const code = ref(`
-  console.log('隐藏着黑暗力量的钥匙啊，在我面前显示你真正的力量，跟你定下约定的小樱命令你，封印解除！');
+const code = ref(`// 代码包裹在 async 函数中执行，需要返回值记得 return
+console.log('隐藏着黑暗力量的钥匙啊，在我面前显示你真正的力量，跟你定下约定的小樱命令你，封印解除！');
 `)
 </script>
 
