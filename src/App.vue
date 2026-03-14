@@ -61,23 +61,41 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue'
-import { CodeEditor } from 'monaco-editor-vue3'
-import hljs from 'highlight.js/lib/core'
-import javascript from 'highlight.js/lib/languages/javascript'
-import 'highlight.js/styles/atom-one-dark.css'
-import VirtualizedTable from './VirtualizedTable.vue'
-import { useSocket } from './useSocket'
+import hljs from "highlight.js/lib/core";
+import javascript from "highlight.js/lib/languages/javascript";
+import { CodeEditor } from "monaco-editor-vue3";
+import { ref } from "vue";
+import "highlight.js/styles/atom-one-dark.css";
+import { useSocket } from "./useSocket";
+import VirtualizedTable from "./VirtualizedTable.vue";
 
-hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage("javascript", javascript);
 
-const port = ref(3666)
+// 获取 URL 查询参数的函数
+const getQueryParam = () => {
+  // 创建 URLSearchParams 对象来解析查询字符串
+  const searchParams = new URLSearchParams(window.location.search);
+  // 获取参数值
+  const paramValue = searchParams.get("port");
+  
+  // 验证参数值是否为有效的数字端口号
+  if (paramValue) {
+    const num = parseInt(paramValue, 10);
+    // 检查是否是有效数字且在端口号范围内 (0-65535)
+    if (!isNaN(num) && num >= 0 && num <= 65535) {
+      return num;
+    }
+  }
+  return 3666;
+};
+
+const port = ref(getQueryParam());
 const { isConnected, executeRemoteCode, logs, clearLogs } = useSocket({
-  port,
-})
+	port,
+});
 const code = ref(`// 代码包裹在 async 函数中执行，需要返回值记得 return
 console.log('隐藏着黑暗力量的钥匙啊，在我面前显示你真正的力量，跟你定下约定的小樱命令你，封印解除！');
-`)
+`);
 </script>
 
 <style>
