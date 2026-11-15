@@ -7,10 +7,12 @@ import type { ExecuteResultItem, FnTraceItem } from './types'
 /** 本地最多保留多少条记录，防止长时间挂机把内存吃满 */
 const MAX_LOGS = 5000
 
-export function useSocket({ port }: { port: Ref<number> }) {
+export function useSocket({ port, token }: { port: Ref<number>; token: string }) {
   const logs = ref<FnTraceItem[]>([])
   const isConnected = ref(false)
   const socket = ref<Socket>()
+  /** 鉴权失败 / 缺少令牌时的提示文案，非空即代表连不上是有原因的 */
+  const authError = ref('')
   /** 最近一次远程执行的结果 */
   const lastResult = ref<ExecuteResultItem>()
   const executing = ref(false)
@@ -22,13 +24,39 @@ export function useSocket({ port }: { port: Ref<number> }) {
       isConnected.value = false
     }
 
+    // 没有令牌连上去也只会被服务端踢掉，不如直接把原因说清楚
+    if (!token) {
+      authError.value = '缺少访问令牌：请从 QQ 设置面板点击「DevTools」重新打开本页面'
+      return
+    }
+
+    authError.value = ''
+
     socket.value = io(`http://localhost:${port.value}`, {
       transports: ['websocket'],
+      // 令牌走 CONNECT 包体，不会出现在 URL 里
+      auth: { token },
+      // 端口变了 / 令牌过期时不要无限重试
+      reconnectionAttempts: 10,
     })
 
     socket.value.on('connect', () => {
       isConnected.value = true
+      authError.value = ''
       console.log('✅ 已连接到 Node 调试服务端', port.value)
+    })
+
+    socket.value.on('connect_error', (err: Error) => {
+      isConnected.value = false
+
+      const message = err?.message ?? ''
+      if (message.includes('invalid-token')) {
+        authError.value = '访问令牌无效或已过期：QQ 重启后令牌会变，请重新点击「DevTools」打开本页面'
+      } else if (message.includes('origin-not-allowed')) {
+        authError.value = '当前页面来源不被允许，请从 QQ 设置面板打开 DevTools'
+      } else {
+        authError.value = `无法连接调试服务端（localhost:${port.value}）：${message || '未知错误'}`
+      }
     })
 
     // 核心：监听函数追踪数据
@@ -131,6 +159,7 @@ export function useSocket({ port }: { port: Ref<number> }) {
   return {
     logs,
     isConnected,
+    authError,
     clearLogs,
     lastResult,
     executing,

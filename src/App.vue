@@ -2,7 +2,7 @@
   <div class="flex h-full p-5">
     <el-splitter lazy>
       <el-splitter-panel size="75%" class="flex flex-col gap-4">
-        <header>
+        <header class="flex flex-col gap-3">
           <div class="flex items-center gap-4">
             <el-tag :type="isConnected ? 'success' : 'danger'" variant="light" class="status-tag">
               <span class="dot" :class="{ 'is-active': isConnected }"></span>
@@ -19,6 +19,11 @@
               <template #prefix>Port:</template>
             </el-input-number> -->
           </div>
+
+          <div v-if="authError" class="auth-error">
+            <span class="auth-error-title">连接被拒绝</span>
+            <span>{{ authError }}</span>
+          </div>
         </header>
 
         <virtualized-table :logs="logs" :clearLogs="clearLogs" />
@@ -27,7 +32,12 @@
       <el-splitter-panel>
         <div class="flex flex-col h-full gap-4">
           <div class="flex items-center gap-3">
-            <el-button type="primary" :loading="executing" @click="executeRemoteCode(code)">
+            <el-button
+              type="primary"
+              :loading="executing"
+              :disabled="!isConnected"
+              @click="executeRemoteCode(code)"
+            >
               执行代码
             </el-button>
 
@@ -113,10 +123,21 @@ const getQueryParam = () => {
   return 3666;
 };
 
+/**
+ * 对话密钥：QQ 每次启动时生成，由设置面板拼进 URL 带过来。
+ * 没有它服务端会拒绝连接，页面也无法执行任何代码。
+ */
+const getTokenParam = () => {
+  const searchParams = new URLSearchParams(window.location.search);
+  return searchParams.get("token")?.trim() ?? "";
+};
+
 const port = ref(getQueryParam());
-const { isConnected, executeRemoteCode, logs, clearLogs, lastResult, executing } =
+const token = getTokenParam();
+const { isConnected, authError, executeRemoteCode, logs, clearLogs, lastResult, executing } =
 	useSocket({
 		port,
+		token,
 	});
 const code = ref(`// 代码包裹在 async 函数中执行，需要返回值记得 return
 console.log('隐藏着黑暗力量的钥匙啊，在我面前显示你真正的力量，跟你定下约定的小樱命令你，封印解除！');
@@ -183,6 +204,23 @@ const copyResult = async () => {
   flex: 1;
   overflow: auto;
   padding: 8px 10px;
+}
+
+.auth-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #b42318;
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  border-radius: 6px;
+}
+
+.auth-error-title {
+  flex-shrink: 0;
+  font-weight: 600;
 }
 
 @keyframes pulse {
