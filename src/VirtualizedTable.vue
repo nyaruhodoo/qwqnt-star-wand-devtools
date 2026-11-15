@@ -60,205 +60,218 @@
 </template>
 
 <script lang="tsx" setup>
-import { dayjs, ElMessage, type TableV2Instance } from "element-plus";
-import hljs from "highlight.js/lib/core";
-import javascript from "highlight.js/lib/languages/javascript";
-import { computed, nextTick, ref, watch } from "vue";
-import type { FnTraceItem } from "./types";
-import "highlight.js/styles/atom-one-dark.css";
-import "element-plus/es/components/message/style/css";
-import { formatCodeLight, matchValue } from "./utils";
+import { dayjs, ElMessage, type TableV2Instance } from 'element-plus'
+import { computed, nextTick, ref, watch, type VNodeChild } from 'vue'
+import type { DetailRow, FnTraceItem } from './types'
+import 'element-plus/es/components/message/style/css'
+import { matchValue } from './utils'
+import { flattenText, toText } from './serialize'
+import ValueTree from './ValueTree.vue'
 
-hljs.registerLanguage("javascript", javascript);
-
-const codeHighlight = (code?: string) => {
-	if (!code) return "";
-	const formattedCode = formatCodeLight(code, "javascript");
-	if (hljs.getLanguage("javascript")) {
-		return hljs.highlight(formattedCode, { language: "javascript" }).value;
-	}
-	return formattedCode;
-};
-
-const tableRef = ref<TableV2Instance>();
+const tableRef = ref<TableV2Instance>()
 const { logs } = defineProps<{
-	logs: FnTraceItem[];
-	clearLogs: () => void;
-}>();
+  logs: FnTraceItem[]
+  clearLogs: () => void
+}>()
 
-const autoScroll = ref(true);
-const expandedRowKeys = ref<string[]>([]);
-const filterPath = ref("");
-const filterRes = ref("");
-const filterTypes = ref<string[]>([
-	"Function",
-	"AsyncFunction",
-	"Listener",
-	"Service",
-]);
-const filterStatus = ref<string[]>(["ok", "error", "cancel"]);
+const autoScroll = ref(true)
+const expandedRowKeys = ref<string[]>([])
+const filterPath = ref('')
+const filterRes = ref('')
+const filterTypes = ref<string[]>(['Function', 'AsyncFunction', 'Listener', 'Service'])
+const filterStatus = ref<string[]>(['ok', 'error', 'cancel'])
+
+/**
+ * 搜索结果文本是整棵信封树拍平后的内容，代价比字符串大，
+ * 因此按记录对象缓存一次：只有输入了关键词才会真正计算。
+ */
+const haystackCache = new WeakMap<FnTraceItem, string>()
+const haystackOf = (item: FnTraceItem) => {
+  const cached = haystackCache.get(item)
+  if (cached !== undefined) return cached
+
+  const text = [
+    item.callPath ?? '',
+    flattenText(item.requestParams),
+    flattenText(item.responseParams),
+  ].join('\n')
+
+  haystackCache.set(item, text)
+  return text
+}
 
 const filteredLogs = computed(() => {
-	return logs
-		.filter((item) => {
-			// 1. 路径匹配
-			const matchPath = matchValue(item?.callPath, filterPath.value);
+  return logs
+    .filter((item) => {
+      // 1. 路径匹配
+      const matchPath = matchValue(item.callPath, filterPath.value)
 
-			// 2. 类型匹配
-			const matchType = filterTypes.value.includes(item?.type ?? "");
+      // 2. 类型匹配
+      const matchType = filterTypes.value.includes(item.type ?? '')
 
-			// 3. 状态匹配
-			const matchStatus = filterStatus.value.includes(item?.status ?? "");
+      // 3. 状态匹配
+      const matchStatus = filterStatus.value.includes(item.status ?? '')
 
-			// 4. 结果匹配
-			const matchRes =
-				matchValue(item?.requestParams, filterRes.value) ||
-				matchValue(item?.responseParams, filterRes.value);
+      // 4. 结果匹配：在整棵信封树里搜，而不是只看顶层的那个字符串
+      const matchRes = !filterRes.value || matchValue(haystackOf(item), filterRes.value)
 
-			return matchPath && matchType && matchStatus && matchRes;
-		})
-		.map((i) => {
-			// @ts-expect-error  忽略错误
-			i.children = [
-				{
-					id: `${i.id}-detail-content`,
-					// 标记这是一个详情行，方便 Row 组件判断
-					isDetail: true,
-					requestParams: i.requestParams,
-					responseParams: i.responseParams,
-				},
-			];
-			return i;
-		});
-});
+      return matchPath && matchType && matchStatus && matchRes
+    })
+    .map<FnTraceItem>((item) => {
+      item.children = [
+        {
+          id: `${item.id}-detail-content`,
+          isDetail: true,
+          requestParams: item.requestParams,
+          responseParams: item.responseParams,
+          truncated: item.truncated,
+          callPath: item.callPath,
+        },
+      ]
+      return item
+    })
+})
 
 const columns = [
-	{
-		key: "callTime",
-		dataKey: "callTime",
-		title: "触发时间",
-		width: 250,
-		cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
-			return <span>{dayjs(rowData.callTime).format("HH:mm:ss.SSS")}</span>;
-		},
-		// sortable: true,
-	},
-	{
-		key: "callPath",
-		dataKey: "callPath",
-		title: "调用路径",
-		width: 350,
-		cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
-			return (
-				<el-tooltip effect="dark" content={rowData.callPath} placement="top">
-					<span
-						class="cursor-pointer"
-						onClick={() => {
-							copyToClipboard(rowData.callPath);
-						}}
-					>
-						{rowData?.callPath?.split("/").pop()}
-					</span>
-				</el-tooltip>
-			);
-		},
-	},
-	{
-		key: "type",
-		dataKey: "type",
-		title: "函数类型",
-		width: 200,
-	},
-	{
-		key: "status",
-		dataKey: "status",
-		title: "状态",
-		width: 150,
-		cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
-			const type = {
-				ok: "success",
-				error: "danger",
-				cancel: "danger",
-			}[rowData?.status || "ok"];
+  {
+    key: 'callTime',
+    dataKey: 'callTime',
+    title: '触发时间',
+    width: 250,
+    cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
+      return <span>{dayjs(rowData.callTime).format('HH:mm:ss.SSS')}</span>
+    },
+  },
+  {
+    key: 'callPath',
+    dataKey: 'callPath',
+    title: '调用路径',
+    width: 350,
+    cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
+      return (
+        <el-tooltip effect="dark" content={rowData.callPath} placement="top">
+          <span class="cursor-pointer" onClick={() => copyToClipboard(rowData.callPath)}>
+            {rowData.callPath?.split('/').pop()}
+          </span>
+        </el-tooltip>
+      )
+    },
+  },
+  {
+    key: 'type',
+    dataKey: 'type',
+    title: '函数类型',
+    width: 200,
+    cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
+      return (
+        <span class="flex items-center gap-2">
+          {rowData.type}
+          {rowData.truncated && (
+            <el-tag type="warning" size="small" disable-transitions>
+              截断
+            </el-tag>
+          )}
+        </span>
+      )
+    },
+  },
+  {
+    key: 'status',
+    dataKey: 'status',
+    title: '状态',
+    width: 150,
+    cellRenderer: ({ rowData }: { rowData: FnTraceItem }) => {
+      const type = {
+        ok: 'success',
+        error: 'danger',
+        cancel: 'danger',
+      }[rowData.status ?? 'ok']
 
-			return (
-				<el-tag type={type} disable-transitions>
-					{rowData?.status}
-				</el-tag>
-			);
-		},
-	},
-];
+      return (
+        <el-tag type={type} disable-transitions>
+          {rowData.status}
+        </el-tag>
+      )
+    },
+  },
+]
 
 const copyToClipboard = async (text?: string) => {
-	if (!text) return;
-	try {
-		await navigator.clipboard.writeText(text);
-		ElMessage.success("已复制到剪切板");
-	} catch {
-		ElMessage.error("复制失败");
-	}
-};
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪切板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
 
-const Row = ({ cells, rowData }: { cells: unknown; rowData: FnTraceItem }) => {
-	// @ts-expect-error  忽略错误
-	if (rowData.isDetail)
-		return (
-			<div class="flex w-full p-4 gap-3 relative max-h-125">
-				<div class="flex-1 flex flex-col">
-					<span
-						class="cursor-pointer transition-colors hover:text-blue-500"
-						onClick={(e) => {
-							copyToClipboard(rowData.requestParams);
-							e.stopPropagation();
-						}}
-					>
-						请求参数：
-					</span>
-					<pre class="flex-1 overflow-y-auto">
-						<code v-html={codeHighlight(rowData.requestParams)} />
-					</pre>
-				</div>
+const Row = ({ cells, rowData }: { cells: VNodeChild; rowData: FnTraceItem | DetailRow }) => {
+  if ('isDetail' in rowData && rowData.isDetail) {
+    return (
+      <div class="flex w-full p-4 gap-3 relative max-h-125">
+        <div class="flex-1 flex flex-col min-w-0">
+          <span class="flex items-center gap-2 mb-1">
+            <span
+              class="cursor-pointer transition-colors hover:text-blue-500"
+              onClick={(e) => {
+                copyToClipboard(toText(rowData.requestParams))
+                e.stopPropagation()
+              }}
+            >
+              请求参数：
+            </span>
+            <span class="text-xs text-gray-400">点击复制</span>
+          </span>
+          <div class="flex-1 overflow-auto pr-2">
+            <ValueTree node={rowData.requestParams} />
+          </div>
+        </div>
 
-				<div class="flex-1 flex flex-col">
-					<span class="cursor-pointer transition-colors hover:text-blue-500"
-          onClick={(e) => {
-							copyToClipboard(rowData.responseParams);
-							e.stopPropagation();
-						}}
-          >
-						响应结果：
-					</span>
-					<pre class="flex-1 overflow-y-auto">
-						<code v-html={codeHighlight(rowData.responseParams)} />
-					</pre>
-				</div>
-			</div>
-		);
+        <div class="flex-1 flex flex-col min-w-0">
+          <span class="flex items-center gap-2 mb-1">
+            <span
+              class="cursor-pointer transition-colors hover:text-blue-500"
+              onClick={(e) => {
+                copyToClipboard(toText(rowData.responseParams))
+                e.stopPropagation()
+              }}
+            >
+              响应结果：
+            </span>
+            <span class="text-xs text-gray-400">点击复制</span>
+          </span>
+          <div class="flex-1 overflow-auto pr-2">
+            <ValueTree node={rowData.responseParams} />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
-	return cells;
-};
-Row.inheritAttrs = false;
+  return cells
+}
+Row.inheritAttrs = false
 
 const onRowExpand = ({ expanded }: { expanded: boolean }) => {
-	if (expanded) {
-		autoScroll.value = false;
-	}
-};
+  if (expanded) {
+    autoScroll.value = false
+  }
+}
 
 watch(
-	() => filteredLogs.value.length,
-	() => {
-		if (autoScroll.value && tableRef.value) {
-			nextTick(() => {
-				const lastIndex = filteredLogs.value.length - 1;
-				if (lastIndex >= 0) {
-					tableRef.value?.scrollToRow(lastIndex);
-				}
-			});
-		}
-	},
-);
+  () => filteredLogs.value.length,
+  () => {
+    if (autoScroll.value && tableRef.value) {
+      nextTick(() => {
+        const lastIndex = filteredLogs.value.length - 1
+        if (lastIndex >= 0) {
+          tableRef.value?.scrollToRow(lastIndex)
+        }
+      })
+    }
+  },
+)
 </script>
 
 <style>
@@ -267,10 +280,5 @@ watch(
 }
 .el-table-v2__expand-icon {
   margin-inline-start: 0 !important;
-}
-pre {
-  white-space: pre-wrap !important; /* 保留空格但允许换行 */
-  word-break: break-all !important; /* 强制在单词内换行，防止长字符串撑破容器 */
-  margin: 4px 0;
 }
 </style>

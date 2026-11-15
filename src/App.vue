@@ -26,34 +26,55 @@
 
       <el-splitter-panel>
         <div class="flex flex-col h-full gap-4">
-          <el-button type="primary" @click="executeRemoteCode(code)">执行代码</el-button>
+          <div class="flex items-center gap-3">
+            <el-button type="primary" :loading="executing" @click="executeRemoteCode(code)">
+              执行代码
+            </el-button>
 
-          <CodeEditor
-            v-model:value="code"
-            language="javascript"
-            theme="vs-dark"
-            :options="{
-              fontSize: 14,
-              lineNumbers: 'on',
-              tabSize: 2,
-              autoIndent: true,
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              wordWrap: 'on',
-              theme: 'vs-dark',
-              // 启用代码补全提示（基础开关）
-              quickSuggestions: {
-                other: true,
-                comments: true,
-                strings: true,
-              },
-              // 启用参数提示（比如函数入参）
-              parameterHints: { enabled: true },
-              // 实时显示错误提示
-              showErrorDecorations: true,
-              automaticLayout: true,
-            }"
-          />
+            <template v-if="lastResult">
+              <el-tag :type="lastResult.ok ? 'success' : 'danger'" disable-transitions>
+                {{ lastResult.ok ? '成功' : '失败' }}
+              </el-tag>
+              <span class="text-xs text-gray-400">耗时 {{ lastResult.durationMs }} ms</span>
+              <el-button link type="primary" @click="copyResult">复制结果</el-button>
+            </template>
+          </div>
+
+          <div class="flex-1 min-h-0">
+            <CodeEditor
+              v-model:value="code"
+              language="javascript"
+              theme="vs-dark"
+              :options="{
+                fontSize: 14,
+                lineNumbers: 'on',
+                tabSize: 2,
+                autoIndent: true,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                theme: 'vs-dark',
+                // 启用代码补全提示（基础开关）
+                quickSuggestions: {
+                  other: true,
+                  comments: true,
+                  strings: true,
+                },
+                // 启用参数提示（比如函数入参）
+                parameterHints: { enabled: true },
+                // 实时显示错误提示
+                showErrorDecorations: true,
+                automaticLayout: true,
+              }"
+            />
+          </div>
+
+          <div v-if="lastResult" class="result-panel">
+            <div class="result-title">执行结果</div>
+            <div class="result-body">
+              <ValueTree :node="lastResult.result" />
+            </div>
+          </div>
         </div>
       </el-splitter-panel>
     </el-splitter>
@@ -65,9 +86,12 @@ import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
 import { CodeEditor } from "monaco-editor-vue3";
 import { ref } from "vue";
+import { ElMessage } from "element-plus";
 import "highlight.js/styles/atom-one-dark.css";
 import { useSocket } from "./useSocket";
 import VirtualizedTable from "./VirtualizedTable.vue";
+import ValueTree from "./ValueTree.vue";
+import { toText } from "./serialize";
 
 hljs.registerLanguage("javascript", javascript);
 
@@ -90,12 +114,23 @@ const getQueryParam = () => {
 };
 
 const port = ref(getQueryParam());
-const { isConnected, executeRemoteCode, logs, clearLogs } = useSocket({
-	port,
-});
+const { isConnected, executeRemoteCode, logs, clearLogs, lastResult, executing } =
+	useSocket({
+		port,
+	});
 const code = ref(`// 代码包裹在 async 函数中执行，需要返回值记得 return
 console.log('隐藏着黑暗力量的钥匙啊，在我面前显示你真正的力量，跟你定下约定的小樱命令你，封印解除！');
 `);
+
+const copyResult = async () => {
+	if (!lastResult.value) return;
+	try {
+		await navigator.clipboard.writeText(toText(lastResult.value.result));
+		ElMessage.success("已复制执行结果");
+	} catch {
+		ElMessage.error("复制失败");
+	}
+};
 </script>
 
 <style>
@@ -122,6 +157,32 @@ console.log('隐藏着黑暗力量的钥匙啊，在我面前显示你真正的�
     box-shadow: 0 0 8px #67c23a;
     animation: pulse 2s infinite;
   }
+}
+
+.result-panel {
+  height: 34%;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.result-title {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #606266;
+  background: #f5f7fa;
+  border-bottom: 1px solid #dcdfe6;
+}
+
+.result-body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px;
 }
 
 @keyframes pulse {
