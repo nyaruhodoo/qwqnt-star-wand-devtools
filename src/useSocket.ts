@@ -1,7 +1,7 @@
 import { ref, markRaw, onUnmounted, watch, type Ref } from 'vue'
 import { io, Socket } from 'socket.io-client'
 import { ElMessage } from 'element-plus'
-import { normalizeNode } from './serialize'
+import { normalizeNode, decodeValue } from './serialize'
 import type { ExecuteResultItem, FnTraceItem } from './types'
 
 /** 本地最多保留多少条记录，防止长时间挂机把内存吃满 */
@@ -13,8 +13,6 @@ export function useSocket({ port, token }: { port: Ref<number>; token: string })
   const socket = ref<Socket>()
   /** 鉴权失败 / 缺少令牌时的提示文案，非空即代表连不上是有原因的 */
   const authError = ref('')
-  /** 最近一次远程执行的结果 */
-  const lastResult = ref<ExecuteResultItem>()
   const executing = ref(false)
 
   // 初始化连接
@@ -100,17 +98,13 @@ export function useSocket({ port, token }: { port: Ref<number>; token: string })
       if (!res) return
 
       executing.value = false
-      lastResult.value = {
-        ...res,
-        result: markRaw(normalizeNode(res.result)),
-        receivedAt: Date.now(),
-      }
 
-      if (res.ok) {
-        ElMessage.success(`执行成功（${res.durationMs} ms）`)
-      } else {
-        ElMessage.error(`执行失败（${res.durationMs} ms）`)
-      }
+      // 结果只走浏览器控制台：面板里不再渲染一份，省掉一次额外的查看操作。
+      // decodeValue 还原成真 JS 值，控制台里能直接展开/继续调用它的方法。
+      const value = decodeValue(normalizeNode(res.result))
+      const label = `${res.ok ? '✅ 执行成功' : '❌ 执行失败'}（${res.durationMs} ms）`
+      if (res.ok) console.log(label, value)
+      else console.error(label, value)
     })
 
     socket.value.on('disconnect', () => {
@@ -161,7 +155,6 @@ export function useSocket({ port, token }: { port: Ref<number>; token: string })
     isConnected,
     authError,
     clearLogs,
-    lastResult,
     executing,
     /** 暴露 socket 实例（ref 形式，setup 阶段还没赋值）以备不时之需 */
     socket,

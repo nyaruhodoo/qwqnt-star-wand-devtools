@@ -39,6 +39,4 @@ export interface ExecuteResultItem {
   ok: boolean
   result: SerializedValue
   durationMs: number
-  /** 前端收到的时间戳 */
-  receivedAt: number
 }

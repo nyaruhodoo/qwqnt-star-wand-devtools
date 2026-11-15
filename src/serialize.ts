@@ -208,34 +208,34 @@ export function decodeValue(node: SerializedValue): unknown {
 /* ------------------------------------------------------------------ */
 
 export interface ToTextOptions {
-  /** 文本化最大深度，超出用 … 省略 */
+  /** 文本化最大深度，超出用占位字符串顶上 */
   maxDepth?: number
   /** 首行缩进 */
   indent?: string
 }
 
 /**
- * 信封树 → 类 JS 字面量文本。
- * 用于复制到剪贴板 / 粘贴到控制台前参考，以及长按查看。
+ * 信封树 → 合法的 JS 字面量。
+ *
+ * 输出要能直接粘进控制台、也能整段写进 `.js` 文件执行，所以每个分支都必须是合法语法。
+ * 函数 / Promise / 二进制 / 循环引用 / 截断这些没法用字面量表达的东西，
+ * 统一退化成带类型前缀的字符串，而不是 `[Function foo]`、`→ #1` 这类非法占位符。
  */
 export function toText(node: SerializedValue, options: ToTextOptions = {}): string {
   const maxDepth = options.maxDepth ?? 8
 
-  const wrap = (text: string, depth: number, indent: string): string => {
-    if (depth >= maxDepth) return '…'
-    if (!text.includes('\n')) return text
-    const inner = text
-      .split('\n')
-      .map((line) => `${indent}${line}`)
-      .join('\n')
-    return `\n${inner}\n${indent.slice(0, Math.max(0, indent.length - 2))}`
-  }
+  /** 合法标识符原样输出，其余 key 加引号 */
+  const key = (name: string): string =>
+    /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name)
+
+  /** 无法用字面量表达的值，退化成字符串 */
+  const label = (text: string): string => JSON.stringify(text)
 
   const walk = (n: SerializedValue, depth: number, indent: string): string => {
     const nextIndent = `${indent}  `
 
     // 深度闸门必须在所有分支之前：否则 30 层嵌套会整棵树铺出来
-    if (depth > maxDepth) return '…'
+    if (depth > maxDepth) return label(`[… 嵌套超过 ${maxDepth} 层]`)
 
     switch (n.t) {
       case 'undef':
@@ -250,69 +250,79 @@ export function toText(node: SerializedValue, options: ToTextOptions = {}): stri
         return `${n.v}n`
       case 'str':
         return `${JSON.stringify(n.v)}${n.len !== undefined ? ` /* 共 ${n.len} 字符 */` : ''}`
-      case 'sym':
-        return n.v
+      case 'sym': {
+        // v 是 `Symbol(desc)` 这样的展示串，直接照抄会变成未定义标识符
+        const desc = /^Symbol\((.*)\)$/s.exec(n.v)?.[1]?.trim() ?? ''
+        return desc ? `Symbol(${JSON.stringify(desc)})` : 'Symbol()'
+      }
       case 'fn':
-        return `[Function${n.name ? ` ${n.name}` : ''}]`
+        return label(`[Function${n.name ? `: ${n.name}` : ''}]`)
       case 'date':
-        return `Date(${n.v})`
+        return n.v === 'Invalid Date' ? 'new Date(NaN)' : `new Date(${JSON.stringify(n.v)})`
       case 'regexp':
         return n.v
       case 'weak':
-        return `[${n.ctor}]`
+        return label(`[${n.ctor}]`)
       case 'promise':
-        return 'Promise { <pending> }'
+        return label('[Promise]')
       case 'bin':
-        return `[${n.ctor} ${n.byteLength}B${n.preview ? ` ${n.preview}` : ''}]`
+        return label(`[${n.ctor} ${n.byteLength}B${n.preview ? ` ${n.preview}` : ''}]`)
       case 'cut':
-        return `/* 截断: ${n.v} */`
+        return label(`[截断: ${n.v}]`)
       case 'ref':
-        return `→ #${n.v}${n.circ ? ' /* 循环引用 */' : ''}`
+        return label(`[→ #${n.v}${n.circ ? ' 循环引用' : ''}]`)
       case 'err': {
-        const lines = [`${n.name}: ${n.message}`]
+        // 保留 Error 身份，自定义字段和 cause 一并挂上去
+        const props = [`name: ${JSON.stringify(n.name)}`]
+        if (n.stack) props.push(`stack: ${JSON.stringify(n.stack)}`)
         for (const [k, v] of Object.entries(n.extra ?? {})) {
-          lines.push(`${k}: ${walk(v, depth + 1, nextIndent)}`)
+          props.push(`${key(k)}: ${walk(v, depth + 1, nextIndent)}`)
         }
-        if (n.cause) lines.push(`cause: ${walk(n.cause, depth + 1, nextIndent)}`)
-        return wrap(lines.join('\n'), depth + 1, nextIndent)
+        if (n.cause) props.push(`cause: ${walk(n.cause, depth + 1, nextIndent)}`)
+        return `Object.assign(new Error(${JSON.stringify(n.message)}), {\n${nextIndent}${props.join(
+          `,\n${nextIndent}`,
+        )}\n${indent}})`
       }
       case 'arr': {
         if (n.v.length === 0) return '[]'
-        const body = n.v.map((item) => walk(item, depth + 1, nextIndent)).join(`,\n${nextIndent}`)
-        const more = n.more ? `\n${nextIndent}… 还有 ${n.more} 项` : ''
-        return `[\n${nextIndent}${body}${more}\n${indent}]`
+        const items = n.v.map((item) => walk(item, depth + 1, nextIndent))
+        // 被截断的部分用字符串占位，数组语法依旧成立
+        if (n.more) items.push(label(`[+${n.more} 项未返回]`))
+        return `[\n${nextIndent}${items.join(`,\n${nextIndent}`)}\n${indent}]`
       }
       case 'set': {
-        const body = n.v.map((item) => walk(item, depth + 1, nextIndent)).join(`,\n${nextIndent}`)
-        const more = n.more ? `\n${nextIndent}… 还有 ${n.more} 项` : ''
-        return `${n.ctor ?? 'Set'}(${n.v.length + (n.more ?? 0)}) {${
-          n.v.length ? `\n${nextIndent}${body}${more}\n${indent}` : ''
-        }}`
+        const ctor = n.ctor ?? 'Set'
+        if (!n.v.length) return `new ${ctor}()`
+        const items = n.v.map((item) => walk(item, depth + 1, nextIndent))
+        if (n.more) items.push(label(`[+${n.more} 项未返回]`))
+        return `new ${ctor}([\n${nextIndent}${items.join(`,\n${nextIndent}`)}\n${indent}])`
       }
       case 'map': {
-        const body = n.v
-          .map(([k, v]) => `${walk(k, depth + 1, nextIndent)} => ${walk(v, depth + 1, nextIndent)}`)
-          .join(`,\n${nextIndent}`)
-        const more = n.more ? `\n${nextIndent}… 还有 ${n.more} 项` : ''
-        return `${n.ctor ?? 'Map'}(${n.v.length + (n.more ?? 0)}) {${
-          n.v.length ? `\n${nextIndent}${body}${more}\n${indent}` : ''
-        }}`
+        const ctor = n.ctor ?? 'Map'
+        if (!n.v.length) return `new ${ctor}()`
+        const pairs = n.v.map(
+          ([k, v]) => `[${walk(k, depth + 1, nextIndent)}, ${walk(v, depth + 1, nextIndent)}]`,
+        )
+        if (n.more) pairs.push(`[${label(`[+${n.more} 项未返回]`)}, null]`)
+        return `new ${ctor}([\n${nextIndent}${pairs.join(`,\n${nextIndent}`)}\n${indent}])`
       }
       case 'obj': {
+        // 构造器名写进字面量就是非法语法（`Foo { ... }`），降级成尾部注释
+        const notes = [
+          n.ctor ? `构造器: ${n.ctor}` : '',
+          n.fromProto?.length ? `含原型 getter: ${n.fromProto.join(', ')}` : '',
+        ].filter(Boolean)
+        const note = notes.length ? ` /* ${notes.join('; ')} */` : ''
+
         const entries = Object.entries(n.v)
-        const proto = n.fromProto?.length ? ` /* 含原型 getter: ${n.fromProto.join(', ')} */` : ''
-        if (entries.length === 0) return `${n.ctor ?? '{}'}${proto}`
-        const body = entries
-          .map(
-            ([k, v]) =>
-              `${/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k)}: ${walk(v, depth + 1, nextIndent)}`,
-          )
-          .join(`,\n${nextIndent}`)
-        const more = n.more ? `\n${nextIndent}… 还有 ${n.more} 个字段` : ''
-        return `${n.ctor ? `${n.ctor} ` : ''}{\n${nextIndent}${body}${more}\n${indent}}${proto}`
+        if (entries.length === 0) return `{}${note}`
+
+        const lines = entries.map(([k, v]) => `${key(k)}: ${walk(v, depth + 1, nextIndent)}`)
+        if (n.more) lines.push(`${key(`[+${n.more} 个字段未返回]`)}: ${n.more}`)
+        return `{\n${nextIndent}${lines.join(`,\n${nextIndent}`)}\n${indent}}${note}`
       }
       default:
-        return ''
+        return 'undefined'
     }
   }
 
